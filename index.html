@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Blitzschutz – Trennungsabstand s</title>
+
+<style>
+  body { font-family: Arial, sans-serif; background:#f4f6f8; margin:20px; }
+  .container { max-width:980px; background:#fff; padding:22px; border-radius:14px; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+
+  h1 { margin:0; font-size:32px; font-weight:800; }
+  .subtitle { margin-top:6px; font-size:13px; color:#57606a; font-weight:600; }
+
+  label { display:block; margin-top:16px; font-weight:700; font-size:15px; }
+
+  input, select {
+    width:100%;
+    height:50px;
+    padding:10px 14px;
+    margin-top:7px;
+    border:1px solid #d0d7de;
+    border-radius:12px;
+    font-size:16px;
+    box-sizing:border-box;
+    background:#fff;
+  }
+
+  .box { background:#eef3ff; padding:18px; margin-top:22px; border-radius:14px; font-weight:800; font-size:22px; }
+  .box span { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+
+  .formula {
+    margin-top:18px;
+    padding:16px;
+    background:#f5f7fa;
+    border-radius:14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size:15px;
+    line-height:1.6;
+  }
+
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:900px){ .row2{ grid-template-columns:1fr; } }
+
+  table { margin-top:18px; border-collapse:collapse; width:100%; }
+  th, td { border:1px solid #ccc; padding:10px; font-size:14px; vertical-align:top; }
+  th { background:#f0f0f0; text-align:left; }
+
+  .details {
+    margin-top:16px;
+    padding:12px;
+    background:#0b1020;
+    color:#e6edf3;
+    border-radius:12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    white-space: pre-wrap;
+    font-size:13px;
+  }
+
+  .hidden { display:none; }
+</style>
+</head>
+
+<body>
+<div class="container">
+  <h1>Blitzschutz – Trennungsabstand s</h1>
+  <div class="subtitle">Umschaltbar: SN 414022 (CH) oder EN 62305 (vereinfachte Variante)</div>
+
+  <label for="method">Berechnungsmethode</label>
+  <select id="method">
+    <option value="EN">EN 62305 (vereinfachte Variante)</option>
+    <option value="CH" selected>SN 414022:2024 (CH)</option>
+  </select>
+
+  <div class="formula" id="formulaBox"></div>
+
+  <!-- Gemeinsame Eingaben -->
+  <div class="row2">
+    <div>
+      <label for="lpl">LPL / Blitzschutzklasse</label>
+      <select id="lpl">
+        <option value="I">I</option>
+        <option value="II">II</option>
+        <option value="III" selected>III</option>
+      </select>
+    </div>
+    <div>
+      <label for="n">Anzahl Ableitungen (n)</label>
+      <input type="number" id="n" value="4" min="1" step="1" />
+    </div>
+  </div>
+
+  <!-- EN 62305 Block -->
+  <div id="blockEN">
+    <label for="earthing">Erdungsart</label>
+    <select id="earthing">
+      <option value="B" selected>Ring- / Fundamenterder (Typ B)</option>
+      <option value="A">Vereinfachte Erdungsanlage (Typ A)</option>
+    </select>
+
+    <div class="row2">
+      <div>
+        <label for="km">Isoliermedium (k<sub>m</sub>)</label>
+        <select id="km">
+          <option value="1" selected>Luft (k<sub>m</sub> = 1.0)</option>
+          <option value="0.5">Mauerwerk / Beton (k<sub>m</sub> = 0.5)</option>
+        </select>
+      </div>
+      <div>
+        <label for="l_en">Bezugslänge l (m)</label>
+        <input type="number" id="l_en" value="10" min="0" step="0.1" />
+      </div>
+    </div>
+  </div>
+
+  <!-- CH SN 414022 Block -->
+  <div id="blockCH" class="hidden">
+    <div class="row2">
+      <div>
+        <label for="U">Gebäudeumfang U (m)</label>
+        <input type="number" id="U" value="60" min="0" step="0.1" />
+      </div>
+      <div>
+        <label for="A">A (m) entlang Fang/Ableitung bis PA/Erdung</label>
+        <input type="number" id="A" value="10" min="0" step="0.1" />
+      </div>
+    </div>
+  </div>
+
+  <div class="box">
+    Trennungsabstand s: <span id="s_cm">-</span> cm
+    <span style="font-weight:700; font-size:16px;">( <span id="s_m">-</span> m )</span>
+  </div>
+
+  <table id="paramTable"></table>
+
+  <div class="details" id="details"></div>
+</div>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+
+  // Werte (wie in deinen Leitsätzen / Tabellen):
+  // EN (vereinfachter Ansatz): ki (LPL I-III)
+  const KI_EN = { I: 0.08, II: 0.06, III: 0.04 };
+
+  // CH SN 414022: k und x_n (Tabelle 8)
+  const K_CH  = { I: 0.08, II: 0.06, III: 0.04 };
+  const XN_CH = { I: 10,   II: 10,   III: 15  };
+
+  function kcEN(n, earthingType){
+    // Typ A: konservativ
+    if(earthingType === "A") return 1.0;
+
+    // Typ B: vereinfachter Ansatz
+    if(n === 1) return 1.0;
+    if(n === 2) return 0.5;
+    return 0.44; // n >= 3
+  }
+
+  function setFormula(){
+    const m = $("method").value;
+    if(m === "EN"){
+      $("formulaBox").innerHTML =
+        "<b>EN 62305 (vereinfachte Variante)</b><br>" +
+        "s = (k<sub>i</sub> / k<sub>m</sub>) · k<sub>c</sub> · l";
+    } else {
+      $("formulaBox").innerHTML =
+        "<b>SN 414022:2024 (CH)</b><br>" +
+        "s = k · (n<sub>0</sub> / n) · A &nbsp;&nbsp; mit &nbsp; n<sub>0</sub> = U / x<sub>n</sub>";
+    }
+  }
+
+  function renderParamTableEN(ki, km, kc, l){
+    $("paramTable").innerHTML = `
+      <tr><th>Bezeichnung</th><th>Bedeutung</th><th>Wert</th></tr>
+      <tr><td>k<sub>i</sub></td><td>Faktor abhaengig von LPL</td><td>${fmt(ki)}</td></tr>
+      <tr><td>k<sub>m</sub></td><td>Faktor Isoliermedium</td><td>${fmt(km)}</td></tr>
+      <tr><td>k<sub>c</sub></td><td>Stromaufteilung (vereinfachter Ansatz)</td><td>${fmt(kc)}</td></tr>
+      <tr><td>l</td><td>Bezugslänge entlang Ableitung</td><td>${fmt(l)} m</td></tr>
+      <tr><td>s</td><td>Trennungsabstand</td><td><span id="tbl_s_en">-</span> m</td></tr>
+      <tr><td colspan="3"><b>Formel:</b> s = (k<sub>i</sub> / k<sub>m</sub>) · k<sub>c</sub> · l</td></tr>
+    `;
+  }
+
+  function renderParamTableCH(k, xn, U, n0, n, A){
+    $("paramTable").innerHTML = `
+      <tr><th>Bezeichnung</th><th>Bedeutung</th><th>Wert</th></tr>
+      <tr><td>k</td><td>Faktor gemass Tabelle</td><td>${fmt(k)}</td></tr>
+      <tr><td>x<sub>n</sub></td><td>Abstand der Ableitungen gemass Tabelle</td><td>${fmt(xn)} m</td></tr>
+      <tr><td>U</td><td>Gebäudeumfang</td><td>${fmt(U)} m</td></tr>
+      <tr><td>n<sub>0</sub></td><td>U / x<sub>n</sub></td><td>${fmt(n0)}</td></tr>
+      <tr><td>n</td><td>Anzahl vorhandene Ableitungen</td><td>${fmt(n)}</td></tr>
+      <tr><td>A</td><td>Länge entlang Fang/Ableitung bis PA/Erdung</td><td>${fmt(A)} m</td></tr>
+      <tr><td>s</td><td>Trennungsabstand</td><td><span id="tbl_s_ch">-</span> m</td></tr>
+      <tr><td colspan="3"><b>Formel:</b> s = k · (n<sub>0</sub> / n) · A, mit n<sub>0</sub> = U / x<sub>n</sub></td></tr>
+    `;
+  }
+
+  function fmt(v){
+    if(v === null || v === undefined || !isFinite(v)) return "-";
+    // n0 kann nicht-integer sein -> 3 Stellen
+    if(Math.abs(v) >= 100) return String(Math.round(v));
+    return (Math.round(v*1000)/1000).toString();
+  }
+
+  function recalc(){
+    const method = $("method").value;
+
+    // UI Umschalten
+    $("blockEN").classList.toggle("hidden", method !== "EN");
+    $("blockCH").classList.toggle("hidden", method !== "CH");
+    setFormula();
+
+    // Gemeinsame Werte
+    const lpl = $("lpl").value;
+    const nRaw = parseFloat($("n").value);
+    const n = (isFinite(nRaw) && nRaw >= 1) ? Math.floor(nRaw) : null;
+
+    let s = null;
+    let details = [];
+
+    if(method === "EN"){
+      const ki = KI_EN[lpl] ?? null;
+      const km = parseFloat($("km").value);
+      const l  = parseFloat($("l_en").value);
+      const earthing = $("earthing").value;
+
+      const kc = (n !== null) ? kcEN(n, earthing) : null;
+
+      renderParamTableEN(ki, km, kc, l);
+
+      if(isFinite(ki) && isFinite(km) && km > 0 && isFinite(kc) && isFinite(l) && l >= 0){
+        s = (ki / km) * kc * l;
+      }
+
+      const sTxt = (s !== null) ? s.toFixed(3) : "-";
+      const cell = document.getElementById("tbl_s_en");
+      if(cell) cell.textContent = sTxt;
+
+      details.push("Methode: EN 62305 (vereinfachte Variante)");
+      details.push(`LPL: ${lpl} -> ki=${fmt(ki)}`);
+      details.push(`Erdungsart: ${earthing} -> kc=${fmt(kc)} (aus n=${fmt(n)})`);
+      details.push(`km=${fmt(km)}, l=${fmt(l)} m`);
+      details.push(`s=(ki/km)*kc*l = ${sTxt} m`);
+
+    } else {
+      const k  = K_CH[lpl]  ?? null;
+      const xn = XN_CH[lpl] ?? null;
+
+      const U  = parseFloat($("U").value);
+      const A  = parseFloat($("A").value);
+
+      const n0 = (isFinite(U) && isFinite(xn) && xn > 0) ? (U / xn) : null;
+
+      renderParamTableCH(k, xn, U, n0, n, A);
+
+      if(isFinite(k) && isFinite(n0) && isFinite(n) && n > 0 && isFinite(A) && A >= 0){
+        s = k * (n0 / n) * A;
+      }
+
+      const sTxt = (s !== null) ? s.toFixed(3) : "-";
+      const cell = document.getElementById("tbl_s_ch");
+      if(cell) cell.textContent = sTxt;
+
+      details.push("Methode: SN 414022:2024 (CH)");
+      details.push(`LPL: ${lpl} -> k=${fmt(k)}, xn=${fmt(xn)} m`);
+      details.push(`U=${fmt(U)} m -> n0=U/xn=${fmt(n0)}`);
+      details.push(`n=${fmt(n)}, A=${fmt(A)} m`);
+      details.push(`s=k*(n0/n)*A = ${sTxt} m`);
+    }
+
+    // Output
+    $("s_m").textContent  = (s !== null && isFinite(s)) ? s.toFixed(3) : "-";
+    $("s_cm").textContent = (s !== null && isFinite(s)) ? (s*100).toFixed(1) : "-";
+
+    $("details").textContent = details.join("\n");
+  }
+
+  // Events
+  ["method","lpl","n","earthing","km","l_en","U","A"].forEach(id=>{
+    const el = $(id);
+    if(!el) return;
+    el.addEventListener("input", recalc);
+    el.addEventListener("change", recalc);
+  });
+
+  // Init
+  setFormula();
+  recalc();
+})();
+</script>
+</body>
+</html>
